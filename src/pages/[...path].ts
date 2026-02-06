@@ -24,8 +24,9 @@ app.get('/', async (c) => {
  */
 app.get('/:key', async (c) => {
     const { key } = c.req.param();
-    const destination = await c.env.URLS.get(key);
+    const destination = await c.env.URLS.get(key.toLowerCase());
     if (!destination) return c.text('404 Not Found', 404);
+    if (destination.startsWith('disabled:')) return c.text('410 Gone', 410);
     return c.redirect(destination, 307);
 });
 
