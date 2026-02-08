@@ -29,6 +29,16 @@
 			"id": "<KV_NAMESPACE_ID>",
 			"preview_id": "<KV_NAMESPACE_PREVIEW_ID>",
 		},
+    {
+			"binding": "URL_META",
+			"id": "<PLACEHOLDER_URL_META_ID>",
+			"preview_id": "<PLACEHOLDER_URL_META_PREVIEW_ID>",
+		},
+		{
+			"binding": "ACCESS_LOGS",
+			"id": "<PLACEHOLDER_ACCESS_LOGS_ID>",
+			"preview_id": "<PLACEHOLDER_ACCESS_LOGS_PREVIEW_ID>",
+		},
 	],
   "routes": [
     { "pattern": "<YOUR_DOMAIN>", "custom_domain": true },
