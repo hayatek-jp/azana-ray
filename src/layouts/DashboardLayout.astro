@@ -1,0 +1,218 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+interface Props {
+    title: string;
+    currentPath?: string;
+}
+
+const { title, currentPath = '' } = Astro.props;
+
+const navItems = [
+    { label: 'ダッシュボード', href: '/dashboard/', icon: 'home' },
+    { label: 'URL管理', href: '/dashboard/urls/', icon: 'link' },
+];
+---
+
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" href="/favicon.ico" />
+        <title>{title} | Azana Ray</title>
+    </head>
+    <body>
+        <div class="app-layout">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <a href="/dashboard/" class="logo">
+                        <span class="logo-icon">⚡</span>
+                        <span class="logo-text">Azana Ray</span>
+                    </a>
+                </div>
+                <nav class="sidebar-nav">
+                    {navItems.map((item) => (
+                        <a
+                            href={item.href}
+                            class:list={['nav-item', { active: currentPath === item.href || (item.href !== '/dashboard/' && currentPath.startsWith(item.href)) }]}
+                        >
+                            <span class="nav-icon">
+                                {item.icon === 'home' && '📊'}
+                                {item.icon === 'link' && '🔗'}
+                            </span>
+                            <span class="nav-label">{item.label}</span>
+                        </a>
+                    ))}
+                </nav>
+            </aside>
+            <main class="main-content">
+                <header class="top-bar">
+                    <h1 class="page-title">{title}</h1>
+                </header>
+                <div class="content-area">
+                    <slot />
+                </div>
+            </main>
+        </div>
+    </body>
+</html>
+
+<style>
+    :root {
+        --sidebar-width: 240px;
+        --topbar-height: 56px;
+        --color-bg: #0f1117;
+        --color-bg-secondary: #161821;
+        --color-bg-tertiary: #1e2030;
+        --color-bg-hover: #252840;
+        --color-border: #2a2e42;
+        --color-text: #e0e0e8;
+        --color-text-secondary: #8b8fa8;
+        --color-text-muted: #5c6078;
+        --color-primary: #6c8aff;
+        --color-primary-hover: #859dff;
+        --color-primary-bg: rgba(108, 138, 255, 0.12);
+        --color-success: #4ade80;
+        --color-warning: #fbbf24;
+        --color-danger: #f87171;
+        --color-info: #38bdf8;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+    }
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background: var(--color-bg);
+        color: var(--color-text);
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .app-layout {
+        display: flex;
+        min-height: 100vh;
+    }
+
+    .sidebar {
+        width: var(--sidebar-width);
+        background: var(--color-bg-secondary);
+        border-right: 1px solid var(--color-border);
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 100;
+    }
+
+    .sidebar-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--color-text);
+    }
+
+    .logo-icon {
+        font-size: 1.4em;
+    }
+
+    .logo-text {
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    .sidebar-nav {
+        padding: 12px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: var(--radius-md);
+        text-decoration: none;
+        color: var(--color-text-secondary);
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: all 0.15s ease;
+    }
+
+    .nav-item:hover {
+        background: var(--color-bg-hover);
+        color: var(--color-text);
+    }
+
+    .nav-item.active {
+        background: var(--color-primary-bg);
+        color: var(--color-primary);
+    }
+
+    .nav-icon {
+        font-size: 1.1em;
+        width: 22px;
+        text-align: center;
+    }
+
+    .main-content {
+        flex: 1;
+        margin-left: var(--sidebar-width);
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+    }
+
+    .top-bar {
+        height: var(--topbar-height);
+        padding: 0 28px;
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-bg-secondary);
+        position: sticky;
+        top: 0;
+        z-index: 50;
+    }
+
+    .page-title {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--color-text);
+    }
+
+    .content-area {
+        flex: 1;
+        padding: 28px;
+    }
+
+    @media (max-width: 768px) {
+        .sidebar {
+            display: none;
+        }
+        .main-content {
+            margin-left: 0;
+        }
+    }
+</style>

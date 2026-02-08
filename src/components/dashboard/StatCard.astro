@@ -1,0 +1,98 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+interface Props {
+    label: string;
+    value: string | number;
+    sub?: string;
+    icon?: string;
+    trend?: 'up' | 'down' | 'neutral';
+    trendValue?: string;
+}
+
+const { label, value, sub, icon = '📈', trend, trendValue } = Astro.props;
+---
+
+<div class="stat-card">
+    <div class="stat-icon">{icon}</div>
+    <div class="stat-body">
+        <span class="stat-label">{label}</span>
+        <span class="stat-value">{typeof value === 'number' ? value.toLocaleString() : value}</span>
+        {(sub || trendValue) && (
+            <span class="stat-sub">
+                {trend && trendValue && (
+                    <span class:list={['trend', `trend-${trend}`]}>
+                        {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'} {trendValue}
+                    </span>
+                )}
+                {sub && <span>{sub}</span>}
+            </span>
+        )}
+    </div>
+</div>
+
+<style>
+    .stat-card {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        transition: border-color 0.15s ease;
+    }
+
+    .stat-card:hover {
+        border-color: var(--color-primary);
+    }
+
+    .stat-icon {
+        font-size: 1.6em;
+        line-height: 1;
+    }
+
+    .stat-body {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--color-text);
+        letter-spacing: -0.02em;
+    }
+
+    .stat-sub {
+        font-size: 0.78rem;
+        color: var(--color-text-muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .trend {
+        font-weight: 600;
+    }
+
+    .trend-up {
+        color: var(--color-success);
+    }
+
+    .trend-down {
+        color: var(--color-danger);
+    }
+
+    .trend-neutral {
+        color: var(--color-text-muted);
+    }
+</style>

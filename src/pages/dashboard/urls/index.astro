@@ -1,0 +1,277 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+export const prerender = false;
+
+import DashboardLayout from '@/layouts/DashboardLayout.astro';
+import type { HostGroup } from '@/types/url';
+
+const env = Astro.locals.runtime.env;
+
+// ホスト名ごとにグループ化
+const hostnameMap = new Map<string, { urlCount: number; totalClicks: number }>();
+let urlList = await env.URLS.list();
+while (true) {
+    for (const k of urlList.keys) {
+        const dest = await env.URLS.get(k.name);
+        if (!dest || dest.startsWith('disabled:')) continue;
+        let clicks = 0;
+        let logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:` });
+        clicks += logList.keys.length;
+        while (!logList.list_complete) {
+            logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:`, cursor: logList.cursor });
+            clicks += logList.keys.length;
+        }
+        try {
+            const hostname = new URL(dest).hostname;
+            const existing = hostnameMap.get(hostname) ?? { urlCount: 0, totalClicks: 0 };
+            existing.urlCount++;
+            existing.totalClicks += clicks;
+            hostnameMap.set(hostname, existing);
+        } catch { /* skip */ }
+    }
+    if (urlList.list_complete) break;
+    urlList = await env.URLS.list({ cursor: urlList.cursor });
+}
+
+const hostGroups: HostGroup[] = [...hostnameMap.entries()]
+    .map(([hostname, data]) => ({ hostname, ...data }))
+    .sort((a, b) => b.totalClicks - a.totalClicks);
+---
+
+<DashboardLayout title="URL管理" currentPath="/dashboard/urls/">
+	<div class="toolbar">
+		<div class="search-box">
+			<span class="search-icon">🔍</span>
+			<input
+				type="text"
+				id="searchInput"
+				placeholder="ホスト名で検索..."
+				class="search-input"
+			/>
+		</div>
+		<a href="/dashboard/urls/new/" class="btn btn-primary">
+			<span>＋</span>
+			新規URL作成
+		</a>
+	</div>
+
+	<div class="host-list" id="hostList">
+		{hostGroups.map((group) => (
+			<div class="host-row" data-hostname={group.hostname}>
+				<a href={`/dashboard/urls/${group.hostname}/`} class="host-row-link">
+					<div class="host-row-main">
+						<span class="host-row-icon">🌐</span>
+						<div class="host-row-info">
+							<span class="host-row-name">{group.hostname}</span>
+							<span class="host-row-meta">
+								{group.urlCount} URL · {group.totalClicks.toLocaleString()} アクセス
+							</span>
+						</div>
+					</div>
+					<div class="host-row-actions">
+						<span class="action-link">URL一覧</span>
+						<a
+							href={`/dashboard/analytics/${group.hostname}/`}
+							class="action-link action-link-alt"
+							onclick="event.stopPropagation()"
+						>
+							📊 解析
+						</a>
+						<span class="arrow">→</span>
+					</div>
+				</a>
+			</div>
+		))}
+	</div>
+
+	{hostGroups.length === 0 && (
+		<div class="empty-state">
+			<span class="empty-icon">📭</span>
+			<p class="empty-text">まだ短縮URLが登録されていません。</p>
+			<a href="/dashboard/urls/new/" class="btn btn-primary">
+				最初のURLを作成
+			</a>
+		</div>
+	)}
+</DashboardLayout>
+
+<script>
+	const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+	const hostList = document.getElementById('hostList');
+
+	searchInput?.addEventListener('input', () => {
+		const query = searchInput.value.toLowerCase();
+		const rows = hostList?.querySelectorAll('.host-row') ?? [];
+		for (const row of rows) {
+			const hostname = (row as HTMLElement).dataset.hostname?.toLowerCase() ?? '';
+			(row as HTMLElement).style.display = hostname.includes(query) ? '' : 'none';
+		}
+	});
+</script>
+
+<style>
+	.toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 20px;
+		gap: 16px;
+		flex-wrap: wrap;
+	}
+
+	.search-box {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: 8px 14px;
+		flex: 1;
+		max-width: 400px;
+	}
+
+	.search-icon {
+		font-size: 0.9em;
+	}
+
+	.search-input {
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--color-text);
+		font-size: 0.9rem;
+		width: 100%;
+	}
+
+	.search-input::placeholder {
+		color: var(--color-text-muted);
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 9px 18px;
+		border-radius: var(--radius-md);
+		font-size: 0.88rem;
+		font-weight: 600;
+		text-decoration: none;
+		cursor: pointer;
+		border: none;
+		transition: all 0.15s ease;
+	}
+
+	.btn-primary {
+		background: var(--color-primary);
+		color: #fff;
+	}
+
+	.btn-primary:hover {
+		background: var(--color-primary-hover);
+	}
+
+	.host-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.host-row {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		transition: border-color 0.15s ease;
+	}
+
+	.host-row:hover {
+		border-color: var(--color-primary);
+	}
+
+	.host-row-link {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px 20px;
+		text-decoration: none;
+		color: var(--color-text);
+		gap: 16px;
+	}
+
+	.host-row-main {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex: 1;
+	}
+
+	.host-row-icon {
+		font-size: 1.3em;
+	}
+
+	.host-row-info {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.host-row-name {
+		font-size: 0.95rem;
+		font-weight: 600;
+	}
+
+	.host-row-meta {
+		font-size: 0.8rem;
+		color: var(--color-text-secondary);
+	}
+
+	.host-row-actions {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.action-link {
+		font-size: 0.8rem;
+		color: var(--color-primary);
+		font-weight: 500;
+		padding: 4px 10px;
+		border-radius: var(--radius-sm);
+		text-decoration: none;
+	}
+
+	.action-link:hover {
+		background: var(--color-primary-bg);
+	}
+
+	.action-link-alt {
+		color: var(--color-text-secondary);
+	}
+
+	.action-link-alt:hover {
+		color: var(--color-text);
+		background: var(--color-bg-hover);
+	}
+
+	.arrow {
+		color: var(--color-text-muted);
+		font-size: 1.1rem;
+	}
+
+	.empty-state {
+		text-align: center;
+		padding: 60px 20px;
+	}
+
+	.empty-icon {
+		font-size: 3em;
+	}
+
+	.empty-text {
+		margin: 16px 0 24px;
+		color: var(--color-text-secondary);
+		font-size: 0.95rem;
+	}
+</style>

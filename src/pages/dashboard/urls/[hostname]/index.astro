@@ -1,0 +1,542 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+export const prerender = false;
+
+import DashboardLayout from '@/layouts/DashboardLayout.astro';
+import type { ShortenedUrl, UrlMeta } from '@/types/url';
+
+const { hostname } = Astro.params;
+
+if (!hostname) {
+	return Astro.redirect('/dashboard/urls/');
+}
+
+const env = Astro.locals.runtime.env;
+
+// このホスト名に属するURLを取得
+const urls: ShortenedUrl[] = [];
+let totalClicks = 0;
+
+let urlList = await env.URLS.list();
+while (true) {
+	for (const k of urlList.keys) {
+		const dest = await env.URLS.get(k.name);
+		if (!dest || dest.startsWith('disabled:')) continue;
+		try {
+			if (new URL(dest).hostname !== hostname) continue;
+		} catch { continue; }
+		const metaRaw = await env.URL_META.get(k.name);
+		const meta: UrlMeta = metaRaw
+			? JSON.parse(metaRaw)
+			: { comment: '', createdAt: '' };
+		let clicks = 0;
+		let logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:` });
+		clicks += logList.keys.length;
+		while (!logList.list_complete) {
+			logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:`, cursor: logList.cursor });
+			clicks += logList.keys.length;
+		}
+		totalClicks += clicks;
+		urls.push({
+			key: k.name,
+			destination: dest,
+			comment: meta.comment,
+			createdAt: meta.createdAt,
+			totalClicks: clicks,
+		});
+	}
+	if (urlList.list_complete) break;
+	urlList = await env.URLS.list({ cursor: urlList.cursor });
+}
+
+if (urls.length === 0) {
+	return Astro.redirect('/dashboard/urls/');
+}
+
+const group = { hostname, urlCount: urls.length, totalClicks };
+---
+
+<DashboardLayout title={hostname} currentPath={`/dashboard/urls/${hostname}/`}>
+	<nav class="breadcrumb">
+		<a href="/dashboard/">ダッシュボード</a>
+		<span class="sep">/</span>
+		<a href="/dashboard/urls/">URL管理</a>
+		<span class="sep">/</span>
+		<span class="current">{hostname}</span>
+	</nav>
+
+	<div class="toolbar">
+		<div class="search-box">
+			<span class="search-icon">🔍</span>
+			<input
+				type="text"
+				id="searchInput"
+				placeholder="キー、URL、コメントで検索..."
+				class="search-input"
+			/>
+		</div>
+		<div class="toolbar-actions">
+			<a href={`/dashboard/analytics/${hostname}/`} class="btn btn-secondary">📊 アクセス解析</a>
+			<a href="/dashboard/urls/new/" class="btn btn-primary">＋ 新規作成</a>
+		</div>
+	</div>
+
+	<div class="stats-bar">
+		<span class="stat-item">
+			<strong>{group.urlCount}</strong> URL
+		</span>
+		<span class="stat-divider">·</span>
+		<span class="stat-item">
+			<strong>{group.totalClicks.toLocaleString()}</strong> 総アクセス
+		</span>
+	</div>
+
+	<div class="url-list" id="urlList">
+		{urls.map((url) => (
+			<div class="url-card" data-search={`${url.key} ${url.destination} ${url.comment}`.toLowerCase()}>
+				<div class="url-card-header">
+					<div class="url-key-wrap">
+						<code class="url-key">/{url.key}</code>
+						<button class="copy-btn" data-copy={`${Astro.url.origin}/${url.key}`} title="URLをコピー">
+							📋
+						</button>
+					</div>
+					<div class="url-actions">
+						<a href={`/dashboard/urls/${hostname}/${url.key}/edit/`} class="action-btn">✏️ 編集</a>
+						<button class="action-btn action-btn-danger delete-btn" data-key={url.key}>🗑️ 削除</button>
+					</div>
+				</div>
+				<div class="url-destination">
+					<span class="dest-label">→</span>
+					<a href={url.destination} class="dest-link" target="_blank" rel="noopener">
+						{url.destination}
+					</a>
+				</div>
+				{url.comment && (
+					<div class="url-comment">
+						<span class="comment-icon">💬</span>
+						<span class="comment-text">{url.comment}</span>
+					</div>
+				)}
+				<div class="url-meta">
+					<span class="meta-item">📅 {new Date(url.createdAt).toLocaleDateString('ja-JP')}</span>
+					<span class="meta-item">👆 {url.totalClicks.toLocaleString()} アクセス</span>
+				</div>
+			</div>
+		))}
+	</div>
+
+	{urls.length === 0 && (
+		<div class="empty-state">
+			<span class="empty-icon">📭</span>
+			<p class="empty-text">このホストにはまだURLが登録されていません。</p>
+			<a href="/dashboard/urls/new/" class="btn btn-primary">最初のURLを作成</a>
+		</div>
+	)}
+
+	<!-- 削除確認モーダル -->
+	<div class="modal-overlay" id="deleteModal" hidden>
+		<div class="modal">
+			<h3 class="modal-title">URLを削除しますか？</h3>
+			<p class="modal-text">キー <code id="deleteKey"></code> のURLを無効化します。この操作は元に戻せません。</p>
+			<div class="modal-actions">
+				<button class="btn btn-secondary" id="cancelDelete">キャンセル</button>
+				<button class="btn btn-danger" id="confirmDelete">削除する</button>
+			</div>
+		</div>
+	</div>
+</DashboardLayout>
+
+<script>
+	// 検索
+	const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+	const urlList = document.getElementById('urlList');
+
+	searchInput?.addEventListener('input', () => {
+		const query = searchInput.value.toLowerCase();
+		const cards = urlList?.querySelectorAll('.url-card') ?? [];
+		for (const card of cards) {
+			const searchText = (card as HTMLElement).dataset.search ?? '';
+			(card as HTMLElement).style.display = searchText.includes(query) ? '' : 'none';
+		}
+	});
+
+	// コピー
+	document.querySelectorAll('.copy-btn').forEach((btn) => {
+		btn.addEventListener('click', async () => {
+			const text = (btn as HTMLElement).dataset.copy ?? '';
+			try {
+				await navigator.clipboard.writeText(text);
+				const original = btn.textContent;
+				btn.textContent = '✅';
+				setTimeout(() => { btn.textContent = original; }, 1500);
+			} catch {
+				// clipboard API not available
+			}
+		});
+	});
+
+	// 削除
+	const deleteModal = document.getElementById('deleteModal')!;
+	const deleteKeyEl = document.getElementById('deleteKey')!;
+	const cancelDelete = document.getElementById('cancelDelete')!;
+	const confirmDelete = document.getElementById('confirmDelete')!;
+	let pendingDeleteKey = '';
+
+	document.querySelectorAll('.delete-btn').forEach((btn) => {
+		btn.addEventListener('click', () => {
+			pendingDeleteKey = (btn as HTMLElement).dataset.key ?? '';
+			deleteKeyEl.textContent = pendingDeleteKey;
+			deleteModal.hidden = false;
+		});
+	});
+
+	cancelDelete.addEventListener('click', () => {
+		deleteModal.hidden = true;
+	});
+
+	confirmDelete.addEventListener('click', async () => {
+		try {
+			const res = await fetch(`/api/urls/${pendingDeleteKey}`, { method: 'DELETE' });
+			if (res.ok) {
+				const card = document.querySelector(`[data-search*="${pendingDeleteKey}"]`) as HTMLElement;
+				if (card) {
+					card.style.opacity = '0.3';
+					card.style.pointerEvents = 'none';
+				}
+			} else {
+				alert('削除に失敗しました。');
+			}
+		} catch {
+			alert('削除に失敗しました。');
+		}
+		deleteModal.hidden = true;
+	});
+
+	deleteModal.addEventListener('click', (e) => {
+		if (e.target === deleteModal) deleteModal.hidden = true;
+	});
+</script>
+
+<style>
+	.breadcrumb {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 20px;
+		font-size: 0.85rem;
+	}
+
+	.breadcrumb a {
+		color: var(--color-text-secondary);
+		text-decoration: none;
+	}
+
+	.breadcrumb a:hover {
+		color: var(--color-primary);
+	}
+
+	.breadcrumb .sep {
+		color: var(--color-text-muted);
+	}
+
+	.breadcrumb .current {
+		color: var(--color-text);
+		font-weight: 500;
+	}
+
+	.toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 16px;
+		gap: 16px;
+		flex-wrap: wrap;
+	}
+
+	.toolbar-actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.search-box {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: 8px 14px;
+		flex: 1;
+		max-width: 400px;
+	}
+
+	.search-icon { font-size: 0.9em; }
+
+	.search-input {
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--color-text);
+		font-size: 0.9rem;
+		width: 100%;
+	}
+
+	.search-input::placeholder { color: var(--color-text-muted); }
+
+	.stats-bar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 16px;
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		margin-bottom: 20px;
+		font-size: 0.88rem;
+		color: var(--color-text-secondary);
+	}
+
+	.stat-item strong {
+		color: var(--color-text);
+	}
+
+	.stat-divider {
+		color: var(--color-text-muted);
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 9px 18px;
+		border-radius: var(--radius-md);
+		font-size: 0.85rem;
+		font-weight: 600;
+		text-decoration: none;
+		cursor: pointer;
+		border: none;
+		transition: all 0.15s ease;
+	}
+
+	.btn-primary {
+		background: var(--color-primary);
+		color: #fff;
+	}
+
+	.btn-primary:hover {
+		background: var(--color-primary-hover);
+	}
+
+	.btn-secondary {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-secondary);
+		border: 1px solid var(--color-border);
+	}
+
+	.btn-secondary:hover {
+		color: var(--color-text);
+		background: var(--color-bg-hover);
+	}
+
+	.btn-danger {
+		background: var(--color-danger);
+		color: #fff;
+	}
+
+	.btn-danger:hover {
+		background: #ef4444;
+	}
+
+	.url-list {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.url-card {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		padding: 18px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		transition: all 0.2s ease;
+	}
+
+	.url-card:hover {
+		border-color: var(--color-primary);
+	}
+
+	.url-card-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.url-key-wrap {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.url-key {
+		font-size: 1.05rem;
+		font-weight: 700;
+		color: var(--color-primary);
+		background: var(--color-primary-bg);
+		padding: 3px 10px;
+		border-radius: var(--radius-sm);
+	}
+
+	.copy-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 0.9em;
+		padding: 4px;
+		border-radius: 4px;
+		transition: background 0.15s ease;
+	}
+
+	.copy-btn:hover {
+		background: var(--color-bg-hover);
+	}
+
+	.url-actions {
+		display: flex;
+		gap: 6px;
+	}
+
+	.action-btn {
+		font-size: 0.8rem;
+		padding: 5px 10px;
+		border-radius: var(--radius-sm);
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-secondary);
+		border: none;
+		cursor: pointer;
+		text-decoration: none;
+		transition: all 0.15s ease;
+	}
+
+	.action-btn:hover {
+		background: var(--color-bg-hover);
+		color: var(--color-text);
+	}
+
+	.action-btn-danger:hover {
+		background: rgba(248, 113, 113, 0.15);
+		color: var(--color-danger);
+	}
+
+	.url-destination {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.dest-label {
+		color: var(--color-text-muted);
+	}
+
+	.dest-link {
+		color: var(--color-text-secondary);
+		text-decoration: none;
+		font-size: 0.88rem;
+		word-break: break-all;
+	}
+
+	.dest-link:hover {
+		color: var(--color-primary);
+	}
+
+	.url-comment {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 0.85rem;
+		color: var(--color-text-secondary);
+		padding: 8px 12px;
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-sm);
+	}
+
+	.comment-icon { font-size: 0.9em; }
+
+	.url-meta {
+		display: flex;
+		gap: 16px;
+		font-size: 0.78rem;
+		color: var(--color-text-muted);
+	}
+
+	.empty-state {
+		text-align: center;
+		padding: 60px 20px;
+	}
+
+	.empty-icon { font-size: 3em; }
+
+	.empty-text {
+		margin: 16px 0 24px;
+		color: var(--color-text-secondary);
+		font-size: 0.95rem;
+	}
+
+	/* モーダル */
+	.modal-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.modal-overlay[hidden] {
+		display: none;
+	}
+
+	.modal {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		padding: 28px;
+		max-width: 440px;
+		width: 90%;
+	}
+
+	.modal-title {
+		font-size: 1.05rem;
+		font-weight: 600;
+		margin-bottom: 10px;
+	}
+
+	.modal-text {
+		font-size: 0.9rem;
+		color: var(--color-text-secondary);
+		margin-bottom: 20px;
+		line-height: 1.5;
+	}
+
+	.modal-text code {
+		background: var(--color-bg-tertiary);
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-weight: 600;
+		color: var(--color-primary);
+	}
+
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+</style>

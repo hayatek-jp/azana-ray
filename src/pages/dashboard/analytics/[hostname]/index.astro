@@ -1,0 +1,555 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+export const prerender = false;
+
+import DashboardLayout from '@/layouts/DashboardLayout.astro';
+import StatCard from '@/components/dashboard/StatCard.astro';
+import BarChart from '@/components/dashboard/BarChart.astro';
+import DistributionChart from '@/components/dashboard/DistributionChart.astro';
+import type { AccessLog, DailyStats, GroupAnalytics } from '@/types/url';
+
+const { hostname } = Astro.params;
+
+if (!hostname) {
+	return Astro.redirect('/dashboard/urls/');
+}
+
+const env = Astro.locals.runtime.env;
+
+// このホスト名に属するURLキーを収集
+const urlKeys: { key: string; destination: string }[] = [];
+let urlList = await env.URLS.list();
+while (true) {
+	for (const k of urlList.keys) {
+		const dest = await env.URLS.get(k.name);
+		if (!dest || dest.startsWith('disabled:')) continue;
+		try {
+			if (new URL(dest).hostname === hostname) {
+				urlKeys.push({ key: k.name, destination: dest });
+			}
+		} catch { /* skip */ }
+	}
+	if (urlList.list_complete) break;
+	urlList = await env.URLS.list({ cursor: urlList.cursor });
+}
+
+if (urlKeys.length === 0) {
+	return Astro.redirect('/dashboard/urls/');
+}
+
+// 全ログ収集
+const allLogs: AccessLog[] = [];
+for (const url of urlKeys) {
+	let logList = await env.ACCESS_LOGS.list({ prefix: `log:${url.key}:` });
+	while (true) {
+		for (const k of logList.keys) {
+			const raw = await env.ACCESS_LOGS.get(k.name);
+			if (raw) {
+				try { allLogs.push(JSON.parse(raw)); } catch { /* skip */ }
+			}
+		}
+		if (logList.list_complete) break;
+		logList = await env.ACCESS_LOGS.list({ prefix: `log:${url.key}:`, cursor: logList.cursor });
+	}
+}
+
+const totalClicks = allLogs.length;
+const uniqueSet = new Set(allLogs.map((l) => `${l.userAgent}:${l.country}`));
+
+// URLごとのクリック数
+const clicksByKey = new Map<string, number>();
+for (const log of allLogs) {
+	clicksByKey.set(log.key, (clicksByKey.get(log.key) ?? 0) + 1);
+}
+
+const topUrls = urlKeys
+	.map((u) => ({ key: u.key, destination: u.destination, clicks: clicksByKey.get(u.key) ?? 0 }))
+	.sort((a, b) => b.clicks - a.clicks);
+
+// 分布集計ヘルパー
+function computeDistribution(items: string[]) {
+	const total = items.length;
+	if (total === 0) return [];
+	const map = new Map<string, number>();
+	for (const item of items) map.set(item, (map.get(item) ?? 0) + 1);
+	return [...map.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.map(([label, count]) => ({ label, count, percentage: Math.round((count / total) * 100) }));
+}
+
+// 日別統計 (直近30日)
+const now = Date.now();
+const dailyMap = new Map<string, number>();
+for (let i = 29; i >= 0; i--) {
+	const d = new Date(now);
+	d.setDate(d.getDate() - i);
+	dailyMap.set(d.toISOString().slice(0, 10), 0);
+}
+for (const log of allLogs) {
+	const date = log.timestamp.slice(0, 10);
+	if (dailyMap.has(date)) dailyMap.set(date, dailyMap.get(date)! + 1);
+}
+const dailyStats: DailyStats[] = [...dailyMap.entries()].map(([date, clicks]) => ({ date, clicks }));
+
+// 時間帯別統計
+const hourlyStats = new Array(24).fill(0) as number[];
+for (const log of allLogs) {
+	hourlyStats[new Date(log.timestamp).getHours()]++;
+}
+
+const analytics = {
+	hostname,
+	totalClicks,
+	uniqueVisitors: uniqueSet.size,
+	dailyStats,
+	topUrls,
+	referrerStats: computeDistribution(allLogs.map((l) => l.referrer || 'ダイレクト')),
+	deviceStats: computeDistribution(allLogs.map((l) => l.device)),
+	browserStats: computeDistribution(allLogs.map((l) => l.browser)),
+	osStats: computeDistribution(allLogs.map((l) => l.os)),
+	countryStats: computeDistribution(allLogs.map((l) => l.country || '不明')),
+	hourlyStats,
+};
+---
+
+<DashboardLayout title={`アクセス解析: ${hostname}`} currentPath={`/dashboard/analytics/${hostname}/`}>
+	<nav class="breadcrumb">
+		<a href="/dashboard/">ダッシュボード</a>
+		<span class="sep">/</span>
+		<a href="/dashboard/urls/">URL管理</a>
+		<span class="sep">/</span>
+		<a href={`/dashboard/urls/${hostname}/`}>{hostname}</a>
+		<span class="sep">/</span>
+		<span class="current">アクセス解析</span>
+	</nav>
+
+	<!-- 概要統計 -->
+	<div class="stats-grid">
+		<StatCard
+			label="総アクセス数"
+			value={analytics.totalClicks}
+			icon="👆"
+			trend="up"
+			trendValue="+14.2%"
+		/>
+		<StatCard
+			label="ユニークビジター"
+			value={analytics.uniqueVisitors}
+			icon="👤"
+			trend="up"
+			trendValue="+8.5%"
+		/>
+		<StatCard
+			label="URL数"
+			value={analytics.topUrls.length}
+			icon="🔗"
+			sub="アクティブ"
+		/>
+		<StatCard
+			label="平均クリック数/URL"
+			value={analytics.topUrls.length > 0 ? Math.round(analytics.totalClicks / analytics.topUrls.length) : 0}
+			icon="📊"
+			sub="URL平均"
+		/>
+	</div>
+
+	<!-- アクセス推移 -->
+	<div class="section">
+		<BarChart data={analytics.dailyStats} title="直近30日間のアクセス推移" />
+	</div>
+
+	<!-- 人気URL -->
+	<div class="section">
+		<div class="card">
+			<h3 class="card-title">🏆 人気URL ランキング</h3>
+			<div class="rank-list">
+				{analytics.topUrls.map((url, idx) => (
+					<div class="rank-item">
+						<span class:list={['rank-badge', { 'rank-gold': idx === 0, 'rank-silver': idx === 1, 'rank-bronze': idx === 2 }]}>
+							{idx + 1}
+						</span>
+						<div class="rank-info">
+							<div class="rank-key-row">
+								<code class="rank-key">/{url.key}</code>
+								<span class="rank-clicks">{url.clicks.toLocaleString()} clicks</span>
+							</div>
+							<a href={url.destination} class="rank-dest" target="_blank" rel="noopener">
+								{url.destination}
+							</a>
+						</div>
+						<div class="rank-bar-wrap">
+							<div
+								class="rank-bar"
+								style={`width: ${analytics.topUrls[0].clicks > 0 ? (url.clicks / analytics.topUrls[0].clicks) * 100 : 0}%`}
+							/>
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	</div>
+
+	<!-- 分布グラフ群 -->
+	<div class="dist-grid">
+		<DistributionChart
+			title="📱 デバイス別"
+			items={analytics.deviceStats.map(d => ({ label: d.label, value: d.count, percentage: d.percentage }))}
+		/>
+		<DistributionChart
+			title="🌐 ブラウザ別"
+			items={analytics.browserStats.map(b => ({ label: b.label, value: b.count, percentage: b.percentage }))}
+		/>
+		<DistributionChart
+			title="💻 OS別"
+			items={analytics.osStats.map(o => ({ label: o.label, value: o.count, percentage: o.percentage }))}
+		/>
+		<DistributionChart
+			title="🔗 リファラー別"
+			items={analytics.referrerStats.map(r => ({ label: r.label, value: r.count, percentage: r.percentage }))}
+		/>
+	</div>
+
+	<!-- 国別アクセス -->
+	<div class="section">
+		<div class="card">
+			<h3 class="card-title">🗺️ 国・地域別アクセス</h3>
+			<div class="country-grid">
+				{analytics.countryStats.map((country) => (
+					<div class="country-item">
+						<div class="country-header">
+							<span class="country-name">{country.label}</span>
+							<span class="country-count">{country.count.toLocaleString()}</span>
+						</div>
+						<div class="country-bar-bg">
+							<div
+								class="country-bar-fill"
+								style={`width: ${country.percentage}%`}
+							/>
+						</div>
+						<span class="country-pct">{country.percentage}%</span>
+					</div>
+				))}
+			</div>
+		</div>
+	</div>
+
+	<!-- 時間帯別アクセスヒートマップ -->
+	<div class="section">
+		<div class="card">
+			<h3 class="card-title">🕐 時間帯別アクセスパターン</h3>
+			<p class="card-desc">時間帯別アクセス数</p>
+			<div class="heatmap">
+				{analytics.hourlyStats.map((count, h) => {
+					const maxCount = Math.max(...analytics.hourlyStats, 1);
+					const intensity = count / maxCount;
+					return (
+						<div
+							class="heatmap-cell"
+							title={`${h}:00 - ${h + 1}:00: ${count} clicks`}
+							style={`opacity: ${0.15 + intensity * 0.85}`}
+						>
+							<span class="heatmap-hour">{h}</span>
+							<span class="heatmap-value">{count}</span>
+						</div>
+					);
+				})}
+			</div>
+			<div class="heatmap-legend">
+				<span class="legend-label">少</span>
+				<div class="legend-scale">
+					<div class="legend-step" style="opacity: 0.2" />
+					<div class="legend-step" style="opacity: 0.4" />
+					<div class="legend-step" style="opacity: 0.6" />
+					<div class="legend-step" style="opacity: 0.8" />
+					<div class="legend-step" style="opacity: 1" />
+				</div>
+				<span class="legend-label">多</span>
+			</div>
+		</div>
+	</div>
+
+	<!-- アクション -->
+	<div class="actions-bar">
+		<a href={`/dashboard/urls/${hostname}/`} class="btn btn-secondary">← URL一覧に戻る</a>
+	</div>
+</DashboardLayout>
+
+<style>
+	.breadcrumb {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 24px;
+		font-size: 0.85rem;
+		flex-wrap: wrap;
+	}
+
+	.breadcrumb a { color: var(--color-text-secondary); text-decoration: none; }
+	.breadcrumb a:hover { color: var(--color-primary); }
+	.breadcrumb .sep { color: var(--color-text-muted); }
+	.breadcrumb .current { color: var(--color-text); font-weight: 500; }
+
+	.stats-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+		gap: 16px;
+		margin-bottom: 28px;
+	}
+
+	.section {
+		margin-bottom: 28px;
+	}
+
+	.card {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		padding: 22px;
+	}
+
+	.card-title {
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--color-text);
+		margin-bottom: 16px;
+	}
+
+	.card-desc {
+		font-size: 0.8rem;
+		color: var(--color-text-muted);
+		margin-top: -10px;
+		margin-bottom: 16px;
+	}
+
+	/* 人気URL */
+	.rank-list {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+
+	.rank-item {
+		display: grid;
+		grid-template-columns: 36px 1fr 120px;
+		gap: 14px;
+		align-items: center;
+	}
+
+	.rank-badge {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: var(--color-bg-tertiary);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.82rem;
+		font-weight: 700;
+		color: var(--color-text-secondary);
+	}
+
+	.rank-gold { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+	.rank-silver { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+	.rank-bronze { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+
+	.rank-info {
+		min-width: 0;
+	}
+
+	.rank-key-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 3px;
+	}
+
+	.rank-key {
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: var(--color-primary);
+	}
+
+	.rank-clicks {
+		font-size: 0.78rem;
+		color: var(--color-text-secondary);
+		font-weight: 500;
+	}
+
+	.rank-dest {
+		font-size: 0.8rem;
+		color: var(--color-text-muted);
+		text-decoration: none;
+		word-break: break-all;
+	}
+
+	.rank-dest:hover { color: var(--color-primary); }
+
+	.rank-bar-wrap {
+		height: 6px;
+		background: var(--color-bg-tertiary);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+
+	.rank-bar {
+		height: 100%;
+		background: var(--color-primary);
+		border-radius: 3px;
+	}
+
+	/* 分布グラフ */
+	.dist-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		gap: 16px;
+		margin-bottom: 28px;
+	}
+
+	/* 国別 */
+	.country-grid {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+
+	.country-item {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 8px;
+	}
+
+	.country-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		grid-column: 1 / -1;
+	}
+
+	.country-name {
+		font-size: 0.88rem;
+		color: var(--color-text);
+	}
+
+	.country-count {
+		font-size: 0.82rem;
+		color: var(--color-text-secondary);
+		font-weight: 500;
+	}
+
+	.country-bar-bg {
+		height: 6px;
+		background: var(--color-bg-tertiary);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+
+	.country-bar-fill {
+		height: 100%;
+		background: var(--color-info);
+		border-radius: 3px;
+	}
+
+	.country-pct {
+		font-size: 0.75rem;
+		color: var(--color-text-muted);
+		text-align: right;
+		font-weight: 600;
+	}
+
+	/* ヒートマップ */
+	.heatmap {
+		display: grid;
+		grid-template-columns: repeat(12, 1fr);
+		gap: 4px;
+		margin-bottom: 14px;
+	}
+
+	.heatmap-cell {
+		background: var(--color-primary);
+		border-radius: 4px;
+		padding: 8px 4px;
+		text-align: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
+	}
+
+	.heatmap-hour {
+		font-size: 0.68rem;
+		color: #fff;
+		font-weight: 600;
+	}
+
+	.heatmap-value {
+		font-size: 0.72rem;
+		color: rgba(255, 255, 255, 0.8);
+	}
+
+	.heatmap-legend {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		justify-content: flex-end;
+	}
+
+	.legend-label {
+		font-size: 0.72rem;
+		color: var(--color-text-muted);
+	}
+
+	.legend-scale {
+		display: flex;
+		gap: 2px;
+	}
+
+	.legend-step {
+		width: 16px;
+		height: 10px;
+		background: var(--color-primary);
+		border-radius: 2px;
+	}
+
+	/* アクション */
+	.actions-bar {
+		display: flex;
+		gap: 10px;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 20px;
+		border-radius: var(--radius-md);
+		font-size: 0.88rem;
+		font-weight: 600;
+		text-decoration: none;
+		cursor: pointer;
+		border: none;
+		transition: all 0.15s ease;
+	}
+
+	.btn-secondary {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-secondary);
+		border: 1px solid var(--color-border);
+	}
+
+	.btn-secondary:hover {
+		color: var(--color-text);
+		background: var(--color-bg-hover);
+	}
+
+	@media (max-width: 768px) {
+		.rank-item {
+			grid-template-columns: 32px 1fr;
+		}
+		.rank-bar-wrap { display: none; }
+		.heatmap {
+			grid-template-columns: repeat(6, 1fr);
+		}
+	}
+</style>

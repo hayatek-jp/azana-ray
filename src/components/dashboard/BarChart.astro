@@ -1,0 +1,95 @@
+---
+// SPDX-FileCopyrightText: 2026 KATO Hayate <dev@hayatek.jp>
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { DailyStats } from '@/types/url';
+
+interface Props {
+    data: DailyStats[];
+    title?: string;
+}
+
+const { data, title = 'アクセス推移' } = Astro.props;
+const maxClicks = Math.max(...data.map(d => d.clicks));
+---
+
+<div class="chart-container">
+    <h3 class="chart-title">{title}</h3>
+    <div class="chart">
+        <div class="chart-bars">
+            {data.map((d) => (
+                <div class="bar-wrapper" title={`${d.date}: ${d.clicks} clicks`}>
+                    <div
+                        class="bar"
+                        style={`height: ${maxClicks > 0 ? (d.clicks / maxClicks) * 100 : 0}%`}
+                    />
+                    <span class="bar-label">
+                        {d.date.slice(5)}
+                    </span>
+                </div>
+            ))}
+        </div>
+    </div>
+</div>
+
+<style>
+    .chart-container {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+    }
+
+    .chart-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--color-text);
+        margin-bottom: 16px;
+    }
+
+    .chart {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .chart-bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 180px;
+        min-width: fit-content;
+    }
+
+    .bar-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        min-width: 16px;
+        height: 100%;
+        justify-content: flex-end;
+        cursor: pointer;
+    }
+
+    .bar {
+        width: 100%;
+        max-width: 24px;
+        background: var(--color-primary);
+        border-radius: 3px 3px 0 0;
+        transition: background 0.15s ease;
+        min-height: 2px;
+    }
+
+    .bar-wrapper:hover .bar {
+        background: var(--color-primary-hover);
+    }
+
+    .bar-label {
+        font-size: 0.6rem;
+        color: var(--color-text-muted);
+        margin-top: 6px;
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        height: 36px;
+    }
+</style>
