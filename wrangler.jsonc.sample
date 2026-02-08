@@ -60,7 +60,12 @@
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
 	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
+	"vars": {
+		// Cloudflare Access: Team Domain (e.g. "myteam.cloudflareaccess.com")
+		"CF_ACCESS_TEAM_DOMAIN": "<YOUR_ACCESS_DOMAIN>",
+		// Cloudflare Access: Application Audience (AUD) Tag
+		"CF_ACCESS_AUD": "<YOUR_AUD_TAG>"
+	}
 	/**
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

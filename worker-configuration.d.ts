@@ -11,6 +11,10 @@ declare namespace Cloudflare {
 		URL_META: KVNamespace;
 		ACCESS_LOGS: KVNamespace;
 		ASSETS: Fetcher;
+		/** Cloudflare Access: チームドメイン (e.g. "myteam.cloudflareaccess.com") */
+		CF_ACCESS_TEAM_DOMAIN: string;
+		/** Cloudflare Access: Application Audience (AUD) タグ */
+		CF_ACCESS_AUD: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
