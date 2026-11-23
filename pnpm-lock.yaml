@@ -179,8 +179,8 @@ importers:
         specifier: ^12.6.12
         version: 12.6.12(@types/node@25.2.0)(astro@5.17.1(@types/node@25.2.0)(rollup@4.57.1)(supports-color@10.2.2)(typescript@5.9.3))
       '@hono/zod-validator':
-        specifier: ^0.7.6
-        version: 0.7.6(hono@4.13.19)(zod@4.6.7)
+        specifier: ^0.9.1
+        version: 0.9.1(hono@4.13.19)(zod@4.6.7)
       astro:
         specifier: ^5.17.1
         version: 5.17.1(@types/node@25.2.0)(rollup@4.57.1)(supports-color@10.2.2)(typescript@5.9.3)
@@ -801,10 +801,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/zod-validator@0.7.6':
-    resolution: {integrity: sha512-Io1B6d011Gj1KknV4rXYz4le5+5EubcWEU/speUjuw9XMMIaP3n78yXLhjd2A3PXaXaUwEAluOiAyLqhBEJgsw==}
+  '@hono/zod-validator@0.9.1':
+    resolution: {integrity: sha512-iiv6w0qrIc0arfvCtUqBWsvl4fXjzaTcQcCJTTtCnkawF9HHGE+KjEl0ox3gQJ6rKZEgE3mLExlQCF72M+mNuw==}
     peerDependencies:
-      hono: '>=3.9.0'
+      hono: '>=4.11.2'
       zod: ^3.25.0 || ^4.0.0
 
   '@img/colour@1.0.0':
@@ -2752,7 +2752,7 @@ snapshots:
   '@esbuild/win32-x64@0.27.0':
     optional: true
 
-  '@hono/zod-validator@0.7.6(hono@4.13.19)(zod@4.6.7)':
+  '@hono/zod-validator@0.9.1(hono@4.13.19)(zod@4.6.7)':
     dependencies:
       hono: 4.13.19
       zod: 4.6.7
