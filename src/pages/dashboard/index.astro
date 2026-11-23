@@ -4,12 +4,13 @@
 
 export const prerender = false;
 
+import { env } from 'cloudflare:workers';
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import StatCard from '@/components/dashboard/StatCard.astro';
 import BarChart from '@/components/dashboard/BarChart.astro';
 import { getDashboardStats } from '@/server/stats';
 
-const stats = await getDashboardStats(Astro.locals.runtime.env);
+const stats = await getDashboardStats(env);
 const { hostGroups, dailyStats } = stats;
 ---
 
@@ -68,10 +69,10 @@ const { hostGroups, dailyStats } = stats;
 		</div>
 		<div class="host-groups">
 			{hostGroups.map((group) => (
-				<a href={`/dashboard/urls/${group.hostname}/`} class="host-card">
+				<div class="host-card">
 					<div class="host-card-header">
 						<span class="host-icon">🌐</span>
-						<span class="host-name">{group.hostname}</span>
+						<a href={`/dashboard/urls/${group.hostname}/`} class="host-name host-card-link">{group.hostname}</a>
 					</div>
 					<div class="host-card-stats">
 						<div class="host-stat">
@@ -85,9 +86,9 @@ const { hostGroups, dailyStats } = stats;
 					</div>
 					<div class="host-card-actions">
 						<span class="link-btn">URL一覧</span>
-						<a href={`/dashboard/analytics/${group.hostname}/`} class="link-btn link-btn-secondary" onclick="event.stopPropagation()">アクセス解析</a>
+						<a href={`/dashboard/analytics/${group.hostname}/`} class="link-btn link-btn-secondary">アクセス解析</a>
 					</div>
-				</a>
+				</div>
 			))}
 		</div>
 	</div>
@@ -146,6 +147,20 @@ const { hostGroups, dailyStats } = stats;
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+		position: relative;
+	}
+
+	.host-card-link {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	/* カード全体をクリック可能にする */
+	.host-card-link::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: inherit;
 	}
 
 	.host-card:hover {
@@ -205,6 +220,11 @@ const { hostGroups, dailyStats } = stats;
 		text-decoration: none;
 		font-weight: 500;
 		transition: background 0.15s ease;
+	}
+
+	a.link-btn {
+		position: relative;
+		z-index: 1;
 	}
 
 	.link-btn:hover {
