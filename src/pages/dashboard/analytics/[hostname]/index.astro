@@ -8,7 +8,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import StatCard from '@/components/dashboard/StatCard.astro';
 import BarChart from '@/components/dashboard/BarChart.astro';
 import DistributionChart from '@/components/dashboard/DistributionChart.astro';
-import type { AccessLog, DailyStats, GroupAnalytics } from '@/types/url';
+import { getGroupAnalytics } from '@/server/stats';
 
 const { hostname } = Astro.params;
 
@@ -16,102 +16,14 @@ if (!hostname) {
 	return Astro.redirect('/dashboard/urls/');
 }
 
-const env = Astro.locals.runtime.env;
+const analytics = await getGroupAnalytics(Astro.locals.runtime.env, hostname);
 
-// このホスト名に属するURLキーを収集
-const urlKeys: { key: string; destination: string }[] = [];
-let urlList = await env.URLS.list();
-while (true) {
-	for (const k of urlList.keys) {
-		const dest = await env.URLS.get(k.name);
-		if (!dest || dest.startsWith('disabled:')) continue;
-		try {
-			if (new URL(dest).hostname === hostname) {
-				urlKeys.push({ key: k.name, destination: dest });
-			}
-		} catch { /* skip */ }
-	}
-	if (urlList.list_complete) break;
-	urlList = await env.URLS.list({ cursor: urlList.cursor });
-}
-
-if (urlKeys.length === 0) {
+if (analytics === null) {
 	return Astro.redirect('/dashboard/urls/');
 }
 
-// 全ログ収集
-const allLogs: AccessLog[] = [];
-for (const url of urlKeys) {
-	let logList = await env.ACCESS_LOGS.list({ prefix: `log:${url.key}:` });
-	while (true) {
-		for (const k of logList.keys) {
-			const raw = await env.ACCESS_LOGS.get(k.name);
-			if (raw) {
-				try { allLogs.push(JSON.parse(raw)); } catch { /* skip */ }
-			}
-		}
-		if (logList.list_complete) break;
-		logList = await env.ACCESS_LOGS.list({ prefix: `log:${url.key}:`, cursor: logList.cursor });
-	}
-}
-
-const totalClicks = allLogs.length;
-const uniqueSet = new Set(allLogs.map((l) => `${l.userAgent}:${l.country}`));
-
-// URLごとのクリック数
-const clicksByKey = new Map<string, number>();
-for (const log of allLogs) {
-	clicksByKey.set(log.key, (clicksByKey.get(log.key) ?? 0) + 1);
-}
-
-const topUrls = urlKeys
-	.map((u) => ({ key: u.key, destination: u.destination, clicks: clicksByKey.get(u.key) ?? 0 }))
-	.sort((a, b) => b.clicks - a.clicks);
-
-// 分布集計ヘルパー
-function computeDistribution(items: string[]) {
-	const total = items.length;
-	if (total === 0) return [];
-	const map = new Map<string, number>();
-	for (const item of items) map.set(item, (map.get(item) ?? 0) + 1);
-	return [...map.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.map(([label, count]) => ({ label, count, percentage: Math.round((count / total) * 100) }));
-}
-
-// 日別統計 (直近30日)
-const now = Date.now();
-const dailyMap = new Map<string, number>();
-for (let i = 29; i >= 0; i--) {
-	const d = new Date(now);
-	d.setDate(d.getDate() - i);
-	dailyMap.set(d.toISOString().slice(0, 10), 0);
-}
-for (const log of allLogs) {
-	const date = log.timestamp.slice(0, 10);
-	if (dailyMap.has(date)) dailyMap.set(date, dailyMap.get(date)! + 1);
-}
-const dailyStats: DailyStats[] = [...dailyMap.entries()].map(([date, clicks]) => ({ date, clicks }));
-
-// 時間帯別統計
-const hourlyStats = new Array(24).fill(0) as number[];
-for (const log of allLogs) {
-	hourlyStats[new Date(log.timestamp).getHours()]++;
-}
-
-const analytics = {
-	hostname,
-	totalClicks,
-	uniqueVisitors: uniqueSet.size,
-	dailyStats,
-	topUrls,
-	referrerStats: computeDistribution(allLogs.map((l) => l.referrer || 'ダイレクト')),
-	deviceStats: computeDistribution(allLogs.map((l) => l.device)),
-	browserStats: computeDistribution(allLogs.map((l) => l.browser)),
-	osStats: computeDistribution(allLogs.map((l) => l.os)),
-	countryStats: computeDistribution(allLogs.map((l) => l.country || '不明')),
-	hourlyStats,
-};
+const hourlyCounts = analytics.hourlyStats.map((h) => h.count);
+const maxHourlyCount = Math.max(...hourlyCounts, 1);
 ---
 
 <DashboardLayout title={`アクセス解析: ${hostname}`} currentPath={`/dashboard/analytics/${hostname}/`}>
@@ -241,9 +153,8 @@ const analytics = {
 			<h3 class="card-title">🕐 時間帯別アクセスパターン</h3>
 			<p class="card-desc">時間帯別アクセス数</p>
 			<div class="heatmap">
-				{analytics.hourlyStats.map((count, h) => {
-					const maxCount = Math.max(...analytics.hourlyStats, 1);
-					const intensity = count / maxCount;
+				{hourlyCounts.map((count, h) => {
+					const intensity = count / maxHourlyCount;
 					return (
 						<div
 							class="heatmap-cell"

@@ -5,7 +5,7 @@
 export const prerender = false;
 
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
-import type { ShortenedUrl, UrlMeta } from '@/types/url';
+import { getUrls } from '@/server/stats';
 
 const { hostname } = Astro.params;
 
@@ -13,48 +13,14 @@ if (!hostname) {
 	return Astro.redirect('/dashboard/urls/');
 }
 
-const env = Astro.locals.runtime.env;
-
 // このホスト名に属するURLを取得
-const urls: ShortenedUrl[] = [];
-let totalClicks = 0;
-
-let urlList = await env.URLS.list();
-while (true) {
-	for (const k of urlList.keys) {
-		const dest = await env.URLS.get(k.name);
-		if (!dest || dest.startsWith('disabled:')) continue;
-		try {
-			if (new URL(dest).hostname !== hostname) continue;
-		} catch { continue; }
-		const metaRaw = await env.URL_META.get(k.name);
-		const meta: UrlMeta = metaRaw
-			? JSON.parse(metaRaw)
-			: { comment: '', createdAt: '' };
-		let clicks = 0;
-		let logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:` });
-		clicks += logList.keys.length;
-		while (!logList.list_complete) {
-			logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:`, cursor: logList.cursor });
-			clicks += logList.keys.length;
-		}
-		totalClicks += clicks;
-		urls.push({
-			key: k.name,
-			destination: dest,
-			comment: meta.comment,
-			createdAt: meta.createdAt,
-			totalClicks: clicks,
-		});
-	}
-	if (urlList.list_complete) break;
-	urlList = await env.URLS.list({ cursor: urlList.cursor });
-}
+const urls = await getUrls(Astro.locals.runtime.env, hostname);
 
 if (urls.length === 0) {
 	return Astro.redirect('/dashboard/urls/');
 }
 
+const totalClicks = urls.reduce((sum, u) => sum + u.totalClicks, 0);
 const group = { hostname, urlCount: urls.length, totalClicks };
 ---
 

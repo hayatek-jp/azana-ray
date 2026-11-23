@@ -5,39 +5,10 @@
 export const prerender = false;
 
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
-import type { HostGroup } from '@/types/url';
-
-const env = Astro.locals.runtime.env;
+import { getHostGroups } from '@/server/stats';
 
 // ホスト名ごとにグループ化
-const hostnameMap = new Map<string, { urlCount: number; totalClicks: number }>();
-let urlList = await env.URLS.list();
-while (true) {
-    for (const k of urlList.keys) {
-        const dest = await env.URLS.get(k.name);
-        if (!dest || dest.startsWith('disabled:')) continue;
-        let clicks = 0;
-        let logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:` });
-        clicks += logList.keys.length;
-        while (!logList.list_complete) {
-            logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:`, cursor: logList.cursor });
-            clicks += logList.keys.length;
-        }
-        try {
-            const hostname = new URL(dest).hostname;
-            const existing = hostnameMap.get(hostname) ?? { urlCount: 0, totalClicks: 0 };
-            existing.urlCount++;
-            existing.totalClicks += clicks;
-            hostnameMap.set(hostname, existing);
-        } catch { /* skip */ }
-    }
-    if (urlList.list_complete) break;
-    urlList = await env.URLS.list({ cursor: urlList.cursor });
-}
-
-const hostGroups: HostGroup[] = [...hostnameMap.entries()]
-    .map(([hostname, data]) => ({ hostname, ...data }))
-    .sort((a, b) => b.totalClicks - a.totalClicks);
+const hostGroups = await getHostGroups(Astro.locals.runtime.env);
 ---
 
 <DashboardLayout title="URL管理" currentPath="/dashboard/urls/">

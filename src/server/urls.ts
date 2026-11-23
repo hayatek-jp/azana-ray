@@ -6,7 +6,8 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 
 import { randomStringId } from '@/utils/identity';
-import type { UrlMeta, ShortenedUrl, HostGroup, AccessLog } from '@/types/url';
+import type { UrlMeta } from '@/types/url';
+import { countLogsForKey, getDashboardStats, getHostGroups, getUrls } from '@/server/stats';
 
 
 const app = new Hono<{ Bindings: Cloudflare.Env }>()
@@ -15,28 +16,7 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
      */
     .get('/',
         async (c) => {
-            const urls: ShortenedUrl[] = [];
-            let list = await c.env.URLS.list();
-            while (true) {
-                for (const k of list.keys) {
-                    const destination = await c.env.URLS.get(k.name);
-                    if (destination === null || destination.startsWith('disabled:')) continue;
-                    const metaRaw = await c.env.URL_META.get(k.name);
-                    const meta: UrlMeta = metaRaw
-                        ? JSON.parse(metaRaw)
-                        : { comment: '', createdAt: '' };
-                    const clickCount = await countAccessLogs(c.env.ACCESS_LOGS, k.name);
-                    urls.push({
-                        key: k.name,
-                        destination,
-                        comment: meta.comment,
-                        createdAt: meta.createdAt,
-                        totalClicks: clickCount,
-                    });
-                }
-                if (list.list_complete) break;
-                list = await c.env.URLS.list({ cursor: list.cursor });
-            }
+            const urls = await getUrls(c.env);
             return c.json({ urls });
         },
     )
@@ -45,26 +25,7 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
      */
     .get('/groups',
         async (c) => {
-            const map = new Map<string, { urlCount: number; totalClicks: number }>();
-            let list = await c.env.URLS.list();
-            while (true) {
-                for (const k of list.keys) {
-                    const destination = await c.env.URLS.get(k.name);
-                    if (destination === null || destination.startsWith('disabled:')) continue;
-                    try {
-                        const hostname = new URL(destination).hostname;
-                        const existing = map.get(hostname) ?? { urlCount: 0, totalClicks: 0 };
-                        existing.urlCount++;
-                        existing.totalClicks += await countAccessLogs(c.env.ACCESS_LOGS, k.name);
-                        map.set(hostname, existing);
-                    } catch { /* skip invalid URLs */ }
-                }
-                if (list.list_complete) break;
-                list = await c.env.URLS.list({ cursor: list.cursor });
-            }
-            const groups: HostGroup[] = [...map.entries()]
-                .map(([hostname, data]) => ({ hostname, ...data }))
-                .sort((a, b) => b.totalClicks - a.totalClicks);
+            const groups = await getHostGroups(c.env);
             return c.json({ groups });
         },
     )
@@ -73,46 +34,15 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
      */
     .get('/stats',
         async (c) => {
-            let totalUrls = 0;
-            let totalClicks = 0;
-            const hostnames = new Set<string>();
-
-            let list = await c.env.URLS.list();
-            while (true) {
-                for (const k of list.keys) {
-                    const destination = await c.env.URLS.get(k.name);
-                    if (destination === null || destination.startsWith('disabled:')) continue;
-                    totalUrls++;
-                    const clicks = await countAccessLogs(c.env.ACCESS_LOGS, k.name);
-                    totalClicks += clicks;
-                    try { hostnames.add(new URL(destination).hostname); } catch { /* skip */ }
-                }
-                if (list.list_complete) break;
-                list = await c.env.URLS.list({ cursor: list.cursor });
-            }
-
-            // 期間別クリック数
-            const now = Date.now();
-            const todayStart = new Date().setHours(0, 0, 0, 0);
-            const weekStart = now - 7 * 24 * 60 * 60 * 1000;
-            const monthStart = now - 30 * 24 * 60 * 60 * 1000;
-            const allLogs = await getAllAccessLogs(c.env.ACCESS_LOGS);
-            let todayClicks = 0, weeklyClicks = 0, monthlyClicks = 0;
-            for (const log of allLogs) {
-                const ts = new Date(log.timestamp).getTime();
-                if (ts >= todayStart) todayClicks++;
-                if (ts >= weekStart) weeklyClicks++;
-                if (ts >= monthStart) monthlyClicks++;
-            }
-
+            const stats = await getDashboardStats(c.env);
             return c.json({
-                totalUrls,
-                totalClicks,
-                activeUrls: totalUrls,
-                todayClicks,
-                weeklyClicks,
-                monthlyClicks,
-                hostGroupCount: hostnames.size,
+                totalUrls: stats.totalUrls,
+                totalClicks: stats.totalClicks,
+                activeUrls: stats.totalUrls,
+                todayClicks: stats.todayClicks,
+                weeklyClicks: stats.weeklyClicks,
+                monthlyClicks: stats.monthlyClicks,
+                hostGroupCount: stats.hostGroupCount,
             });
         },
     )
@@ -162,7 +92,7 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
             const meta: UrlMeta = metaRaw
                 ? JSON.parse(metaRaw)
                 : { comment: '', createdAt: '' };
-            const totalClicks = await countAccessLogs(c.env.ACCESS_LOGS, key);
+            const totalClicks = await countLogsForKey(c.env.ACCESS_LOGS, key);
             return c.json({
                 key,
                 destination,
@@ -213,40 +143,6 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
             return c.json({ message: 'URL deleted successfully.' });
         }
     );
-
-
-/**
- * 特定キーのアクセスログ数をカウント
- */
-async function countAccessLogs(kv: KVNamespace, key: string): Promise<number> {
-    let count = 0;
-    let list = await kv.list({ prefix: `log:${key}:` });
-    count += list.keys.length;
-    while (!list.list_complete) {
-        list = await kv.list({ prefix: `log:${key}:`, cursor: list.cursor });
-        count += list.keys.length;
-    }
-    return count;
-}
-
-/**
- * 全アクセスログを取得
- */
-async function getAllAccessLogs(kv: KVNamespace): Promise<AccessLog[]> {
-    const logs: AccessLog[] = [];
-    let list = await kv.list({ prefix: 'log:' });
-    while (true) {
-        for (const k of list.keys) {
-            const raw = await kv.get(k.name);
-            if (raw) {
-                try { logs.push(JSON.parse(raw)); } catch { /* skip */ }
-            }
-        }
-        if (list.list_complete) break;
-        list = await kv.list({ prefix: 'log:', cursor: list.cursor });
-    }
-    return logs;
-}
 
 
 export default app;

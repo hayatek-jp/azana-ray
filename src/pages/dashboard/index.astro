@@ -7,93 +7,10 @@ export const prerender = false;
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import StatCard from '@/components/dashboard/StatCard.astro';
 import BarChart from '@/components/dashboard/BarChart.astro';
-import type { HostGroup, DailyStats, AccessLog } from '@/types/url';
+import { getDashboardStats } from '@/server/stats';
 
-const env = Astro.locals.runtime.env;
-
-// URL一覧を取得しグループ化 & 統計集計
-let totalUrls = 0;
-let totalClicks = 0;
-const hostnameMap = new Map<string, { urlCount: number; totalClicks: number }>();
-
-let urlList = await env.URLS.list();
-while (true) {
-    for (const k of urlList.keys) {
-        const dest = await env.URLS.get(k.name);
-        if (!dest || dest.startsWith('disabled:')) continue;
-        totalUrls++;
-        // アクセス数カウント
-        let clicks = 0;
-        let logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:` });
-        clicks += logList.keys.length;
-        while (!logList.list_complete) {
-            logList = await env.ACCESS_LOGS.list({ prefix: `log:${k.name}:`, cursor: logList.cursor });
-            clicks += logList.keys.length;
-        }
-        totalClicks += clicks;
-        try {
-            const hostname = new URL(dest).hostname;
-            const existing = hostnameMap.get(hostname) ?? { urlCount: 0, totalClicks: 0 };
-            existing.urlCount++;
-            existing.totalClicks += clicks;
-            hostnameMap.set(hostname, existing);
-        } catch { /* skip */ }
-    }
-    if (urlList.list_complete) break;
-    urlList = await env.URLS.list({ cursor: urlList.cursor });
-}
-
-const hostGroups: HostGroup[] = [...hostnameMap.entries()]
-    .map(([hostname, data]) => ({ hostname, ...data }))
-    .sort((a, b) => b.totalClicks - a.totalClicks);
-
-// 期間別アクセス数
-const now = Date.now();
-const todayStart = new Date().setHours(0, 0, 0, 0);
-const weekStart = now - 7 * 24 * 60 * 60 * 1000;
-const monthStart = now - 30 * 24 * 60 * 60 * 1000;
-let todayClicks = 0, weeklyClicks = 0, monthlyClicks = 0;
-
-// 日別統計用マップ (直近30日)
-const dailyMap = new Map<string, number>();
-for (let i = 29; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    dailyMap.set(d.toISOString().slice(0, 10), 0);
-}
-
-// 全ログを走査
-let logListAll = await env.ACCESS_LOGS.list({ prefix: 'log:' });
-while (true) {
-    for (const k of logListAll.keys) {
-        const raw = await env.ACCESS_LOGS.get(k.name);
-        if (!raw) continue;
-        try {
-            const log: AccessLog = JSON.parse(raw);
-            const ts = new Date(log.timestamp).getTime();
-            if (ts >= todayStart) todayClicks++;
-            if (ts >= weekStart) weeklyClicks++;
-            if (ts >= monthStart) monthlyClicks++;
-            const date = log.timestamp.slice(0, 10);
-            if (dailyMap.has(date)) {
-                dailyMap.set(date, dailyMap.get(date)! + 1);
-            }
-        } catch { /* skip */ }
-    }
-    if (logListAll.list_complete) break;
-    logListAll = await env.ACCESS_LOGS.list({ prefix: 'log:', cursor: logListAll.cursor });
-}
-
-const stats = {
-    totalUrls,
-    totalClicks,
-    todayClicks,
-    weeklyClicks,
-    monthlyClicks,
-    hostGroupCount: hostnameMap.size,
-};
-
-const dailyStats: DailyStats[] = [...dailyMap.entries()].map(([date, clicks]) => ({ date, clicks }));
+const stats = await getDashboardStats(Astro.locals.runtime.env);
+const { hostGroups, dailyStats } = stats;
 ---
 
 <DashboardLayout title="ダッシュボード" currentPath="/dashboard/">
