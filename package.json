@@ -11,9 +11,9 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^12.6.13",
+    "@astrojs/cloudflare": "^13.1.10",
     "@hono/zod-validator": "^0.9.1",
-    "astro": "^5.18.2",
+    "astro": "^7.4.7",
     "hono": "^4.13.19",
     "zod": "^4.6.7"
   },
