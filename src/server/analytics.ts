@@ -18,8 +18,6 @@ export async function recordAccessLog(
 ): Promise<void> {
     const key = `log:${log.key}:${log.timestamp}`;
     await kv.put(key, JSON.stringify(log), {
-        // 90日後に自動削除
-        expirationTtl: 90 * 24 * 60 * 60,
         metadata: toAccessLogMeta(log),
     });
 }
