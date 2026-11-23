@@ -4,6 +4,7 @@
 
 export const prerender = false;
 
+import { env } from 'cloudflare:workers';
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import type { ShortenedUrl, UrlMeta } from '@/types/url';
 
@@ -12,8 +13,6 @@ const { hostname, key } = Astro.params;
 if (!hostname || !key) {
 	return Astro.redirect('/dashboard/urls/');
 }
-
-const env = Astro.locals.runtime.env;
 
 const destination = await env.URLS.get(key);
 if (!destination || destination.startsWith('disabled:')) {

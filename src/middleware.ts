@@ -12,6 +12,7 @@
  */
 
 import { defineMiddleware } from 'astro:middleware';
+import { env } from 'cloudflare:workers';
 
 /** 保護対象のパスプレフィックス */
 const PROTECTED_PREFIXES = ['/api', '/dashboard'];
@@ -39,14 +40,13 @@ interface JwtPayload {
     [key: string]: unknown;
 }
 
-export const onRequest = defineMiddleware(async ({ request, locals, url }, next) => {
+export const onRequest = defineMiddleware(async ({ request, url }, next) => {
     // 保護対象外のパスはスルー
     const isProtected = PROTECTED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
     if (!isProtected) {
         return next();
     }
 
-    const env = locals.runtime.env;
     const teamDomain = env.CF_ACCESS_TEAM_DOMAIN; // e.g. "myteam.cloudflareaccess.com"
     const policyAud = env.CF_ACCESS_AUD;           // Application Audience (AUD) tag
 

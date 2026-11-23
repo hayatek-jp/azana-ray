@@ -4,6 +4,7 @@
 export const prerender = false;
 
 import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
 
 import urls from '@/server/urls';
 import analytics from '@/server/analytics';
@@ -17,7 +18,7 @@ const route = app
     .route('/analytics', analytics);
 
 export const ALL: APIRoute = async ({ request, locals }) => {
-    return app.fetch(request, locals.runtime.env, locals.runtime.ctx);
+    return app.fetch(request, env, locals.cfContext);
 };
 
 export type AppType = typeof route;

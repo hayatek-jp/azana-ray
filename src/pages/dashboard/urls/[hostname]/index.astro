@@ -4,6 +4,7 @@
 
 export const prerender = false;
 
+import { env } from 'cloudflare:workers';
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import { getUrls } from '@/server/stats';
 
@@ -14,7 +15,7 @@ if (!hostname) {
 }
 
 // このホスト名に属するURLを取得
-const urls = await getUrls(Astro.locals.runtime.env, hostname);
+const urls = await getUrls(env, hostname);
 
 if (urls.length === 0) {
 	return Astro.redirect('/dashboard/urls/');

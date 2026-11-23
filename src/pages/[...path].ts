@@ -4,6 +4,7 @@
 export const prerender = false;
 
 import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import { recordAccessLog } from '@/server/analytics';
 import { parseBrowser, parseOs, parseDevice, parseReferrerDomain } from '@/utils/ua';
@@ -60,5 +61,5 @@ app.get('/:key', async (c) => {
 
 
 export const ALL: APIRoute = async ({ request, locals }) => {
-    return app.fetch(request, locals.runtime.env, locals.runtime.ctx);
+    return app.fetch(request, env, locals.cfContext);
 };

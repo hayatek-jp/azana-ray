@@ -4,6 +4,7 @@
 
 export const prerender = false;
 
+import { env } from 'cloudflare:workers';
 import DashboardLayout from '@/layouts/DashboardLayout.astro';
 import StatCard from '@/components/dashboard/StatCard.astro';
 import BarChart from '@/components/dashboard/BarChart.astro';
@@ -16,7 +17,7 @@ if (!hostname) {
 	return Astro.redirect('/dashboard/urls/');
 }
 
-const analytics = await getGroupAnalytics(Astro.locals.runtime.env, hostname);
+const analytics = await getGroupAnalytics(env, hostname);
 
 if (analytics === null) {
 	return Astro.redirect('/dashboard/urls/');
